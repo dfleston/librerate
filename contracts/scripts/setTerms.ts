@@ -27,32 +27,23 @@ const ABI = [
   "function getOfferingTerms() external view returns (uint256, uint256, uint256)",
 ];
 
-// ─── Arg Parser ───────────────────────────────────────────────────────────────
+// ─── Arg Parser (Environment Variables) ───────────────────────────────────────
 function parseArgs(): { minBuy: number; totalBps: number; value: number } {
-  const args = process.argv;
-
-  const get = (flag: string): string | undefined => {
-    const idx = args.indexOf(flag);
-    return idx !== -1 ? args[idx + 1] : undefined;
-  };
-
-  const minBuyStr  = get("--min-buy");
-  const totalBpsStr = get("--total-bps");
-  const valueStr   = get("--value");
+  const minBuyStr   = process.env.MIN_BUY;
+  const totalBpsStr  = process.env.TOTAL_BPS;
+  const valueStr     = process.env.OFFERING_VALUE;
 
   if (!minBuyStr || !totalBpsStr || !valueStr) {
     console.error(`
-❌  Missing required arguments.
+❌  Missing required environment variables.
 
 Usage:
-  npx hardhat run scripts/setTerms.ts --network amoy -- \\
-    --min-buy <cents> \\
-    --total-bps <basisPoints> \\
-    --value <cents>
+  MIN_BUY=5000 TOTAL_BPS=1000 OFFERING_VALUE=500000 npx hardhat run scripts/setTerms.ts --network amoy
 
-Example (10% offered, $5,000 value, $50 minimum):
-  npx hardhat run scripts/setTerms.ts --network amoy -- \\
-    --min-buy 5000 --total-bps 1000 --value 500000
+Variables (all in cents / basis points):
+  MIN_BUY        Minimum purchase in cents (e.g. 5000 = $50.00)
+  TOTAL_BPS      Total royalty % offered in basis points (e.g. 1000 = 10.00%)
+  OFFERING_VALUE Total USD value of the full offering (e.g. 500000 = $5,000.00)
 `);
     process.exit(1);
   }
