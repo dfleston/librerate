@@ -1,0 +1,154 @@
+Here's a clean, professional **HTML email template** optimized for **Resend** (and React Email if you prefer the JSX version later). You can copy-paste this directly into Resend's dashboard (as HTML) or use it as the `html` field when sending via the Resend SDK.
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Thank You for Purchasing a Royalty Certificate</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f9fafb; margin: 0; padding: 0; }
+        .container { max-width: 600px; margin: 40px auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+        .header { background: linear-gradient(135deg, #1e3a8a, #3b82f6); color: white; padding: 40px 30px; text-align: center; }
+        .content { padding: 40px 30px; color: #1f2937; line-height: 1.6; }
+        .section { margin-bottom: 32px; }
+        .summary-box { background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; }
+        .label { font-size: 13px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
+        .value { font-size: 18px; font-weight: 600; color: #0f172a; margin: 4px 0 0; }
+        .wallet-box { background-color: #f1f5f9; border-left: 4px solid #3b82f6; padding: 16px; font-family: monospace; word-break: break-all; }
+        a { color: #3b82f6; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .terms { font-size: 14px; color: #475569; background-color: #f8fafc; padding: 20px; border-radius: 8px; }
+        .footer { text-align: center; padding: 30px; color: #64748b; font-size: 13px; }
+        .button { display: inline-block; background-color: #3b82f6; color: white; padding: 14px 28px; border-radius: 8px; font-weight: 600; text-decoration: none; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1 style="margin: 0; font-size: 28px;">Thank You!</h1>
+            <p style="margin: 12px 0 0; font-size: 18px; opacity: 0.95;">Your Royalty Certificate has been successfully purchased</p>
+        </div>
+
+        <!-- Content -->
+        <div class="content">
+            <div class="section">
+                <p>Dear <strong>{{buyer_name}}</strong>,</p>
+                <p>Thank you for supporting the book! Your purchase of a Royalty Certificate has been confirmed and the NFT has been minted to your embedded wallet.</p>
+            </div>
+
+            <!-- Transaction Summary -->
+            <div class="section">
+                <h2 style="margin: 0 0 16px; font-size: 20px;">Transaction Summary</h2>
+                <div class="summary-box">
+                    <p><strong>Order ID:</strong> {{order_id}}</p>
+                    <p><strong>Purchase Date:</strong> {{purchase_date}}</p>
+                    <p><strong>Item:</strong> Royalty Certificate for "{{book_title}}"</p>
+                    <p><strong>Amount Paid:</strong> ${{amount_paid}} USD</p>
+                    <p><strong>Share:</strong> {{share_percentage}}% of future royalties</p>
+                    <p><strong>Token ID:</strong> #{{token_id}}</p>
+                </div>
+            </div>
+
+            <!-- Wallet Information -->
+            <div class="section">
+                <h2 style="margin: 0 0 16px; font-size: 20px;">Your Wallet</h2>
+                <p>Your embedded wallet was created automatically. Here is your public wallet address:</p>
+                
+                <div class="wallet-box">
+                    <strong>Wallet Address:</strong><br>
+                    <span style="font-size: 15px;">{{wallet_address}}</span>
+                </div>
+
+                <p style="margin-top: 20px;">
+                    You can view your Royalty Certificate, balance, and future USDC payouts here:
+                </p>
+                <a href="https://dashboard.privy.io" class="button" target="_blank">View Wallet in Privy Dashboard</a>
+                <p style="font-size: 14px; color: #64748b; margin-top: 8px;">
+                    (Log in with the same email you used for purchase)
+                </p>
+            </div>
+
+            <!-- Basic Terms -->
+            <div class="section">
+                <h2 style="margin: 0 0 16px; font-size: 20px;">Royalty Agreement – Key Terms</h2>
+                <div class="terms">
+                    <p>By purchasing this Royalty Certificate, you agree to the following basic terms:</p>
+                    <ul style="padding-left: 20px; margin: 12px 0;">
+                        <li>You own a revenue-share interest in the book "{{book_title}}".</li>
+                        <li>Your share is {{share_percentage}}% of net royalties collected from the book.</li>
+                        <li>Royalties are collected off-chain in fiat and automatically converted to USDC for distribution.</li>
+                        <li>Payouts are distributed proportionally to all certificate holders on a periodic basis (quarterly or as announced).</li>
+                        <li>The certificate is a non-transferable NFT unless otherwise specified in the full agreement.</li>
+                        <li>Full legal terms and the revenue-share agreement are attached to this email.</li>
+                    </ul>
+                    <p style="margin-top: 16px; font-size: 13px;">
+                        <strong>Note:</strong> This is a summary only. Please review the attached PDF for the complete and binding terms.
+                    </p>
+                </div>
+            </div>
+
+            <div class="section" style="text-align: center; margin-top: 40px;">
+                <p>If you have any questions, feel free to reply to this email.</p>
+                <p>We're excited to have you as a royalty partner!</p>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            <p>&copy; {{year}} Your Book/Project Name. All rights reserved.</p>
+            <p>This is an automated confirmation email. Please do not reply directly.</p>
+        </div>
+    </div>
+</body>
+</html>
+```
+
+### How to Use with Resend
+
+When sending via the Resend SDK (Node.js / TypeScript), do this:
+
+```js
+import { Resend } from 'resend';
+
+const resend = new Resend(process.env.RESEND_API_KEY);
+
+await resend.emails.send({
+  from: 'noreply@yourdomain.com',
+  to: '{{buyer_email}}',
+  subject: 'Thank You – Your Royalty Certificate Purchase is Confirmed',
+  html: yourHtmlTemplateAbove,   // paste the HTML string here (or use React Email component)
+  attachments: [
+    {
+      filename: 'Royalty_Agreement.pdf',
+      content: yourBase64EncodedPDF,   // or path if using file
+      // contentType: 'application/pdf'   // optional
+    }
+  ],
+  // You can also pass variables if using a templating engine
+});
+```
+
+### Placeholders to Replace Dynamically
+- `{{buyer_name}}`
+- `{{order_id}}`
+- `{{purchase_date}}`
+- `{{book_title}}`
+- `{{amount_paid}}`
+- `{{share_percentage}}`
+- `{{token_id}}`
+- `{{wallet_address}}`
+- `{{year}}`
+- `{{buyer_email}}`
+
+Would you like me to also give you the **React Email** (JSX) version of this template? It's cleaner for long-term maintenance with Resend.
+
+Let me know if you want any changes:
+- Dark mode support
+- Add a certificate image / NFT preview
+- Make the terms longer or shorter
+- Different branding colors
+
+Just say the word and I'll adjust it instantly.

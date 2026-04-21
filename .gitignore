@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+.npm/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Build & Outputs
+dist/
+build/
+out/
+artifacts/
+cache/
+typechain-types/
+*.tsbuildinfo
+
+# Env & Secrets
+.env
+.env.*
+!.env.example
+secrets.json
+
+# IDEs & System
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.log
+.claude/
+
+# Assets & Large Files
+*.mp4
+*.wav
+*.mp3
+*.zip
+*.gz
+*.tar
+*.dmg
+*.iso
+*.bin
+*.exe
