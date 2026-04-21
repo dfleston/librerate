@@ -37,41 +37,104 @@ const EMAIL_FROM = process.env.EMAIL_FROM || 'onboarding@resend.dev';
 app.use('/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());
 
-// Initialize Contract (requires env variables)
+// ─── Contract Setup ────────────────────────────────────────────────────────────
 const provider = new ethers.JsonRpcProvider(process.env.AMOY_RPC_URL);
-// Using a mock wallet or placeholder if key is undefined or invalid
-const isValidKey = process.env.PRIVATE_KEY && process.env.PRIVATE_KEY.length === 66 && process.env.PRIVATE_KEY.startsWith('0x');
-const signer = isValidKey 
-  ? new ethers.Wallet(process.env.PRIVATE_KEY, provider)
+const isValidKey = process.env.PRIVATE_KEY && process.env.PRIVATE_KEY.length >= 64;
+const signer = isValidKey
+  ? new ethers.Wallet(process.env.PRIVATE_KEY.startsWith('0x') ? process.env.PRIVATE_KEY : `0x${process.env.PRIVATE_KEY}`, provider)
   : ethers.Wallet.createRandom().connect(provider);
 
-// ABI snippet for minting
 const royaltyCertificateABI = [
-  "function mintCertificate(address to, string memory tokenURI, uint256 shareBasisPoints) external returns (uint256)"
+  "function mintCertificate(address to, string memory tokenURI, uint256 shareBasisPoints) external returns (uint256)",
+  "function getOfferingTerms() external view returns (uint256 minBuy, uint256 offeredBps, uint256 offerValue)",
+  "function setOfferingTerms(uint256 minBuyAmountUSD, uint256 totalOfferedBps, uint256 offeringValueUSD) external",
 ];
 
-const isValidContract = process.env.CONTRACT_ADDRESS && process.env.CONTRACT_ADDRESS.length === 42 && process.env.CONTRACT_ADDRESS.startsWith('0x');
+const isValidContract = process.env.CONTRACT_ADDRESS && process.env.CONTRACT_ADDRESS.length === 42;
 const contractAddress = isValidContract ? process.env.CONTRACT_ADDRESS : "0x0000000000000000000000000000000000000000";
 const contract = new ethers.Contract(contractAddress, royaltyCertificateABI, signer);
 
+// ─── Offering Terms Cache ──────────────────────────────────────────────────────
+let termsCache = null;
+let termsCachedAt = 0;
+const CACHE_TTL_MS = 60_000; // 60 seconds
+
+async function fetchOfferingTerms() {
+  const now = Date.now();
+  if (termsCache && (now - termsCachedAt) < CACHE_TTL_MS) {
+    return termsCache;
+  }
+
+  const [minBuy, offeredBps, offerValue] = await contract.getOfferingTerms();
+
+  termsCache = {
+    minBuyAmountUSD: Number(minBuy),       // cents
+    totalOfferedBps: Number(offeredBps),   // basis points
+    offeringValueUSD: Number(offerValue),  // cents
+    // Human-readable helpers
+    minBuyDollars: Number(minBuy) / 100,
+    totalOfferedPercent: Number(offeredBps) / 100,
+    offeringValueDollars: Number(offerValue) / 100,
+  };
+  termsCachedAt = now;
+  return termsCache;
+}
+
+// ─── GET /api/offering-terms ───────────────────────────────────────────────────
+app.get('/api/offering-terms', async (req, res) => {
+  try {
+    const terms = await fetchOfferingTerms();
+    res.json(terms);
+  } catch (error) {
+    console.error('Error fetching offering terms:', error);
+    res.status(500).json({ error: 'Could not fetch offering terms from contract.' });
+  }
+});
+
+// ─── POST /api/create-checkout ─────────────────────────────────────────────────
 app.post('/api/create-checkout', async (req, res) => {
   try {
-    const { amount, shareBps, metadataURI, buyerWallet, email } = req.body;
+    const { amount, metadataURI, buyerWallet, email } = req.body;
+    // NOTE: shareBps is no longer accepted from the client — it's calculated here
+    //       from the on-chain terms to prevent manipulation.
 
     if (!buyerWallet) {
-        return res.status(400).json({ error: 'Missing buyer embedded wallet address' });
+      return res.status(400).json({ error: 'Missing buyer embedded wallet address' });
     }
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ error: 'Missing or invalid amount' });
+    }
+
+    // Fetch offering terms from chain (or cache)
+    const terms = await fetchOfferingTerms();
+
+    if (terms.offeringValueUSD === 0) {
+      return res.status(400).json({ error: 'Offering terms have not been set on-chain yet.' });
+    }
+
+    // Validate minimum purchase
+    if (amount < terms.minBuyAmountUSD) {
+      return res.status(400).json({
+        error: `Minimum purchase is $${terms.minBuyDollars.toFixed(2)}. You sent ${amount} cents.`,
+      });
+    }
+
+    // Calculate shareBps server-side from on-chain terms
+    // shareBps = (amount / offeringValueUSD) × totalOfferedBps
+    const shareBps = Math.round((amount / terms.offeringValueUSD) * terms.totalOfferedBps);
+
+    console.log(`[checkout] amount=${amount}¢, shareBps=${shareBps} (from on-chain terms)`);
 
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
-      customer_email: email, // Optional auto-fill
+      customer_email: email,
       line_items: [
         {
           price_data: {
             currency: 'usd',
             product_data: {
               name: 'Royalty Certificate',
-              description: `Ownership Share: ${shareBps / 100}%`,
+              description: `Ownership Share: ${(shareBps / 100).toFixed(4)}% of royalties`,
             },
             unit_amount: amount, // in cents
           },
@@ -95,6 +158,7 @@ app.post('/api/create-checkout', async (req, res) => {
   }
 });
 
+// ─── POST /webhook ─────────────────────────────────────────────────────────────
 app.post('/webhook', async (req, res) => {
   const sig = req.headers['stripe-signature'];
   let event;
@@ -115,8 +179,8 @@ app.post('/webhook', async (req, res) => {
       const session = event.data.object;
 
       if (session.payment_status !== 'paid') {
-          console.log(`Payment not complete for session ${session.id}`);
-          return res.status(200).send('OK');
+        console.log(`Payment not complete for session ${session.id}`);
+        return res.status(200).send('OK');
       }
 
       const buyerWallet = session.metadata?.buyerWallet;
@@ -129,34 +193,28 @@ app.post('/webhook', async (req, res) => {
       }
 
       console.log(`Minting certificate to ${buyerWallet} for session ${session.id}...`);
-      
-      try {
-          const tx = await contract.mintCertificate(
-            buyerWallet,
-            metadataURI,
-            shareBps
-          );
-          await tx.wait();
-          console.log(`✅ Successfully minted for session ${session.id}, Tx: ${tx.hash}`);
-      } catch (mintError) {
-          console.error(`❌ Minting failed for ${session.id}:`, mintError);
-          // Still send email if appropriate, or handle error
-      }
-      console.log(`✅ Mock Mint Success! Wallet: ${buyerWallet}`);
 
-      // 4. Send Confirmation Email via Resend
       try {
-        const recipientEmail = session.customer_details?.email; 
+        const tx = await contract.mintCertificate(buyerWallet, metadataURI, shareBps);
+        await tx.wait();
+        console.log(`✅ Successfully minted for session ${session.id}, Tx: ${tx.hash}`);
+      } catch (mintError) {
+        console.error(`❌ Minting failed for ${session.id}:`, mintError);
+      }
+
+      // Send Confirmation Email
+      try {
+        const recipientEmail = session.customer_details?.email;
         if (!recipientEmail) throw new Error('No recipient email found');
-        
+
         console.log(`📧 Sending confirmation email to ${recipientEmail}...`);
-        
+
         const emailHtml = await render(
           React.createElement(RoyaltyCertificateEmail, {
             buyerName: session.customer_details?.name || 'Valued Partner',
             orderId: session.id.slice(-8).toUpperCase(),
             purchaseDate: new Date().toLocaleDateString(),
-            bookTitle: "The Silken Thread", 
+            bookTitle: "The Silken Thread",
             amountPaid: (session.amount_total / 100).toFixed(2),
             sharePercentage: (shareBps / 100).toString(),
             tokenId: "1001",
@@ -184,16 +242,16 @@ app.post('/webhook', async (req, res) => {
     res.status(200).send('OK');
   } catch (error) {
     console.error(`Error processing event ${event.type}:`, error);
-    // Important: Return 200 anyway so Stripe doesn't keep retrying forever
     res.status(200).send('OK');
   }
 });
 
+// ─── GET /api/session-details/:sessionId ───────────────────────────────────────
 app.get('/api/session-details/:sessionId', async (req, res) => {
   try {
     const { sessionId } = req.params;
     const session = await stripe.checkout.sessions.retrieve(sessionId);
-    
+
     res.json({
       buyerName: session.customer_details?.name || 'Valued Partner',
       email: session.customer_details?.email,
