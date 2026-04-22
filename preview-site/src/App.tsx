@@ -4,7 +4,7 @@ import { BuyRoyaltyCertificate } from 'royalty-buy-button';
 import SuccessPage from './SuccessPage';
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:4000';
-const STRIPE_KEY  = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || '';
+const STRIPE_KEY  = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || 'pk_test_51TOPpwDZSYB1TfMhT9rDRuWlwJ1OFdteZJL3xvK0gVxJqn1tAuTZ09DVbaA7u09WxrraUqx6ssKPgKDEH2Ai58m8003EGehgQQ';
 
 function LandingPage() {
   return (

@@ -14,9 +14,13 @@ dotenv.config({ path: '../.env' });
 
 const app = express();
 const port = process.env.PORT || 4000;
+const public_url = process.env.NEXT_PUBLIC_BACKEND_URL;
 
 app.use(helmet());
-app.use(cors());
+app.use(cors({
+  origin: '*', // O la URL de tu frontend de Next.js
+  allowedHeaders: ['Content-Type', 'ngrok-skip-browser-warning']
+}));
 
 // Initialize Stripe
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
@@ -36,6 +40,12 @@ const EMAIL_FROM = process.env.EMAIL_FROM || 'onboarding@resend.dev';
 // We need the raw body for the Stripe webhook verification.
 app.use('/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());
+app.use(cors({
+  origin: [
+    "http://localhost:3000", // Your local frontend
+    "https://gladiator-fountain-octagon.ngrok-free.dev" // Your ngrok tunnel
+  ]
+}));
 
 // ─── Contract Setup ────────────────────────────────────────────────────────────
 const provider = new ethers.JsonRpcProvider(process.env.AMOY_RPC_URL);
@@ -269,4 +279,5 @@ app.get('/api/session-details/:sessionId', async (req, res) => {
 
 app.listen(port, () => {
   console.log(`🚀 Royalty Backend server listening on port ${port}`);
+  console.log(`Accesible públicamente en: ${public_url}`);
 });

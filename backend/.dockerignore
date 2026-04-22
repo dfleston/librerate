@@ -1,0 +1,30 @@
+# Dependencias locales (Docker instalará las suyas propias dentro del contenedor)
+node_modules
+npm-debug.log
+yarn-error.log
+
+# Variables de entorno y secretos (Se configuran en la nube o vía parámetros, nunca en la imagen)
+.env
+.env.local
+.env.development
+.env.production
+
+# Git
+.git
+.gitignore
+
+# Archivos de configuración de Hardhat o tests (No necesarios para el servidor Express)
+artifacts
+cache
+contracts
+test
+scripts
+hardhat.config.ts
+hardhat.config.js
+
+# Documentación y otros
+README.md
+LICENSE
+.vscode
+.idea
+.DS_Store

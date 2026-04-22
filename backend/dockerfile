@@ -1,0 +1,18 @@
+# 1. Imagen base de Node.js (versión estable y ligera)
+FROM node:20-slim
+
+# 2. Directorio de trabajo dentro del contenedor
+WORKDIR /app
+
+# 3. Copiar archivos de dependencias e instalarlas
+COPY package*.json ./
+RUN npm install --production
+
+# 4. Copiar el resto del código del servidor
+COPY . .
+
+# 5. Exponer el puerto que usa tu servidor Express
+EXPOSE 4000
+
+# 6. Comando para arrancar el servidor
+CMD ["npx", "tsx", "server.js"]
