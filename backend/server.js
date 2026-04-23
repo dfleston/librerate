@@ -134,6 +134,9 @@ app.post('/api/create-checkout', async (req, res) => {
     const shareBps = Math.round((amount / terms.offeringValueUSD) * terms.totalOfferedBps);
 
     console.log(`[checkout] amount=${amount}¢, shareBps=${shareBps} (from on-chain terms)`);
+    console.log("--- DEBUG STRIPE ---");
+    console.log("FRONTEND_URL Variable:", process.env.FRONTEND_URL);
+    console.log("--- END DEBUG ---");
 
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
