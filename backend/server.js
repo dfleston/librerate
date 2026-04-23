@@ -132,6 +132,7 @@ app.post('/api/create-checkout', async (req, res) => {
     // Calculate shareBps server-side from on-chain terms
     // shareBps = (amount / offeringValueUSD) × totalOfferedBps
     const shareBps = Math.round((amount / terms.offeringValueUSD) * terms.totalOfferedBps);
+    const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
 
     console.log(`[checkout] amount=${amount}¢, shareBps=${shareBps} (from on-chain terms)`);
     console.log("--- DEBUG STRIPE ---");
@@ -155,8 +156,8 @@ app.post('/api/create-checkout', async (req, res) => {
         },
       ],
       mode: 'payment',
-      success_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/cancel`,
+      success_url: `${baseUrl}/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${baseUrl}/cancel`,
       metadata: {
         buyerWallet: buyerWallet,
         shareBps: shareBps.toString(),
