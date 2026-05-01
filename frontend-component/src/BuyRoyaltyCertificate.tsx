@@ -12,6 +12,16 @@ interface OfferingTerms {
   offeringValueDollars: number;
 }
 
+interface SessionDetails {
+  buyerName: string;
+  email: string;
+  amount: string;
+  sharePercentage: string;
+  walletAddress: string;
+  bookTitle: string;
+  status: string;
+}
+
 export interface BuyRoyaltyCertificateProps {
   /** Base URL of the backend, e.g. "http://localhost:4000" */
   backendUrl: string;
@@ -27,6 +37,57 @@ const toPercent = (amountCents: number, terms: OfferingTerms): number => {
 
 const fmt = (n: number, decimals = 2) => n.toFixed(decimals);
 
+// ─── SuccessView ──────────────────────────────────────────────────────────────
+function SuccessView({
+  details,
+  onBack,
+}: {
+  details: SessionDetails;
+  onBack: () => void;
+}) {
+  return (
+    <div style={styles.wrapper}>
+      <div style={successStyles.header}>
+        <p style={successStyles.confirmedLabel}>PURCHASE CONFIRMED</p>
+        <h2 style={successStyles.title}>Ownership Secured.</h2>
+        <p style={successStyles.subtitle}>
+          You now hold a stake in "{details.bookTitle}"
+        </p>
+      </div>
+
+      <div style={successStyles.statGrid}>
+        <div style={successStyles.statBox}>
+          <span style={successStyles.statLabel}>Ownership Share</span>
+          <span style={successStyles.statValue}>{details.sharePercentage}%</span>
+        </div>
+        <div style={successStyles.statBox}>
+          <span style={successStyles.statLabel}>Amount Paid</span>
+          <span style={successStyles.statValue}>${details.amount} USD</span>
+        </div>
+      </div>
+
+      <div style={successStyles.infoRow}>
+        <span style={successStyles.infoLabel}>Buyer</span>
+        <span style={successStyles.infoValue}>{details.buyerName}</span>
+      </div>
+
+      <div style={successStyles.infoRow}>
+        <span style={successStyles.infoLabel}>Wallet Address</span>
+        <span style={successStyles.walletBox}>{details.walletAddress}</span>
+      </div>
+
+      <p style={successStyles.hint}>
+        Your Royalty Certificate has been minted to your embedded wallet.
+        USDC distributions will be deposited automatically.
+      </p>
+
+      <button onClick={onBack} style={styles.button}>
+        BACK
+      </button>
+    </div>
+  );
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 export function BuyRoyaltyCertificate({
   backendUrl,
@@ -36,14 +97,42 @@ export function BuyRoyaltyCertificate({
   const { login, authenticated, user, ready } = usePrivy();
   const { wallets } = useWallets();
 
+  const [phase, setPhase] = useState<'buy' | 'success'>('buy');
+  const [sessionDetails, setSessionDetails] = useState<SessionDetails | null>(null);
+
   const [terms, setTerms]       = useState<OfferingTerms | null>(null);
   const [termsError, setTermsError] = useState<string | null>(null);
   const [amount, setAmount]     = useState<number>(0);     // in cents
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState<string | null>(null);
 
+  // ─── Detect session_id from URL (Stripe return) ────────────────────────────
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sessionId = params.get('session_id');
+    if (sessionId && backendUrl) {
+      fetch(`${backendUrl}/api/session-details/${sessionId}`)
+        .then(r => {
+          if (!r.ok) throw new Error('Failed to fetch session details');
+          return r.json();
+        })
+        .then((data: SessionDetails) => {
+          setSessionDetails(data);
+          setPhase('success');
+          // Clean up URL
+          const url = new URL(window.location.href);
+          url.searchParams.delete('session_id');
+          window.history.replaceState({}, '', url.toString());
+        })
+        .catch(err => {
+          console.error('Error fetching session details:', err);
+        });
+    }
+  }, [backendUrl]);
+
   // ─── Fetch offering terms on mount ──────────────────────────────────────────
   useEffect(() => {
+    if (!backendUrl) return;
     fetch(`${backendUrl}/api/offering-terms`)
       .then(r => r.json())
       .then((data: OfferingTerms) => {
@@ -70,7 +159,7 @@ export function BuyRoyaltyCertificate({
           amount: amountCents,
           buyerWallet: embeddedWallet.address,
           metadataURI,
-          // NOTE: shareBps is intentionally omitted — backend calculates it from on-chain terms
+          returnUrl: window.location.href.split('?')[0], // current page without query params
         }),
       });
 
@@ -79,10 +168,14 @@ export function BuyRoyaltyCertificate({
         throw new Error(body.error || 'Failed to create checkout session');
       }
 
-      const { sessionId } = await response.json();
-      const stripe = await loadStripe(stripePublishableKey);
-      if (stripe) {
-        await stripe.redirectToCheckout({ sessionId });
+      const { sessionId, url } = await response.json();
+      if (url) {
+        window.location.href = url;
+      } else {
+        const stripe = await loadStripe(stripePublishableKey);
+        if (stripe) {
+          await stripe.redirectToCheckout({ sessionId });
+        }
       }
     } catch (err: any) {
       setError(err.message || 'An unexpected error occurred');
@@ -110,6 +203,19 @@ export function BuyRoyaltyCertificate({
     executeCheckout(amount);
   };
 
+  // ─── SUCCESS VIEW ───────────────────────────────────────────────────────────
+  if (phase === 'success' && sessionDetails) {
+    return (
+      <SuccessView
+        details={sessionDetails}
+        onBack={() => {
+          setPhase('buy');
+          setSessionDetails(null);
+        }}
+      />
+    );
+  }
+
   // ─── Derived state ───────────────────────────────────────────────────────────
   const userPercent  = terms ? toPercent(amount, terms) : 0;
   const amountDollars = amount / 100;
@@ -122,7 +228,7 @@ export function BuyRoyaltyCertificate({
       ? 'Acquire Royalty Share'
       : 'Create Your Digital Wallet';
 
-  // ─── Render ──────────────────────────────────────────────────────────────────
+  // ─── BUY VIEW ───────────────────────────────────────────────────────────────
   return (
     <div style={styles.wrapper}>
 
@@ -396,6 +502,8 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: '0',
     transition: 'background-color 0.3s, opacity 0.3s',
     width: '100%',
+    backgroundColor: '#c4a96a',
+    cursor: 'pointer',
   },
   errorMsg: {
     fontFamily: font,
@@ -422,5 +530,102 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#3a3028',
     textAlign: 'center' as const,
     margin: '0',
+  },
+};
+
+// ─── Success View Styles ──────────────────────────────────────────────────────
+const successStyles: Record<string, React.CSSProperties> = {
+  header: {
+    textAlign: 'center',
+    marginBottom: '32px',
+    borderBottom: '1px solid #2a2520',
+    paddingBottom: '24px',
+  },
+  confirmedLabel: {
+    fontFamily: font,
+    fontSize: '10px',
+    fontWeight: 700,
+    letterSpacing: '0.35em',
+    textTransform: 'uppercase',
+    color: '#c4a96a',
+    margin: '0 0 12px 0',
+  },
+  title: {
+    fontSize: '28px',
+    fontWeight: 600,
+    color: '#e8e0d0',
+    margin: '0 0 8px 0',
+    lineHeight: 1.2,
+    fontFamily: "Georgia, 'Times New Roman', serif",
+  },
+  subtitle: {
+    fontFamily: "Georgia, 'Times New Roman', serif",
+    color: '#6a5f50',
+    fontSize: '14px',
+    fontStyle: 'italic',
+    margin: 0,
+  },
+  statGrid: {
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
+    gap: '20px',
+    marginBottom: '24px',
+  },
+  statBox: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '6px',
+  },
+  statLabel: {
+    fontFamily: font,
+    fontSize: '9px',
+    fontWeight: 700,
+    letterSpacing: '0.25em',
+    textTransform: 'uppercase',
+    color: '#6a5f50',
+  },
+  statValue: {
+    fontSize: '22px',
+    fontWeight: 600,
+    color: '#d4c9b5',
+    fontFamily: "Georgia, 'Times New Roman', serif",
+  },
+  infoRow: {
+    marginBottom: '20px',
+  },
+  infoLabel: {
+    display: 'block',
+    fontFamily: font,
+    fontSize: '9px',
+    fontWeight: 700,
+    letterSpacing: '0.25em',
+    textTransform: 'uppercase',
+    color: '#6a5f50',
+    marginBottom: '6px',
+  },
+  infoValue: {
+    fontSize: '15px',
+    fontWeight: 400,
+    color: '#e8e0d0',
+    fontFamily: "Georgia, 'Times New Roman', serif",
+  },
+  walletBox: {
+    display: 'block',
+    backgroundColor: '#161412',
+    borderLeft: '3px solid #c4a96a',
+    padding: '14px 18px',
+    fontFamily: 'monospace',
+    fontSize: '12px',
+    wordBreak: 'break-all',
+    color: '#c4a96a',
+  },
+  hint: {
+    fontFamily: "Georgia, 'Times New Roman', serif",
+    fontSize: '13px',
+    color: '#6a5f50',
+    marginTop: '24px',
+    marginBottom: '24px',
+    lineHeight: 1.6,
+    fontStyle: 'italic',
   },
 };

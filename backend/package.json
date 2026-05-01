@@ -20,10 +20,10 @@
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "resend": "^6.12.2",
-    "stripe": "^15.9.0"
+    "stripe": "^15.9.0",
+    "tsx": "^4.21.0"
   },
   "devDependencies": {
-    "nodemon": "^3.1.0",
-    "tsx": "^4.21.0"
+    "nodemon": "^3.1.0"
   }
 }

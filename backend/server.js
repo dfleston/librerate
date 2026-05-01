@@ -16,11 +16,26 @@ const app = express();
 const port = process.env.PORT || 4000;
 const public_url = process.env.NEXT_PUBLIC_BACKEND_URL;
 
-app.use(helmet());
+// ─── CORS Configuration (single source of truth) ──────────────────────────────
+// ─── CORS Configuration (single source of truth) ──────────────────────────────
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'https://lapromesadevuelta.com',
+  'https://www.lapromesadevuelta.com',
+];
+
 app.use(cors({
-  origin: '*', // O la URL de tu frontend de Next.js
-  allowedHeaders: ['Content-Type', 'ngrok-skip-browser-warning']
+  origin: allowedOrigins,
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
 }));
+
+// Explicit OPTIONS handler for preflight
+app.options('*', cors());
 
 // Initialize Stripe
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
@@ -40,12 +55,6 @@ const EMAIL_FROM = process.env.EMAIL_FROM || 'onboarding@resend.dev';
 // We need the raw body for the Stripe webhook verification.
 app.use('/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());
-app.use(cors({
-  origin: [
-    "http://localhost:3000", // Your local frontend
-    "https://gladiator-fountain-octagon.ngrok-free.dev" // Your ngrok tunnel
-  ]
-}));
 
 // ─── Contract Setup ────────────────────────────────────────────────────────────
 const provider = new ethers.JsonRpcProvider(process.env.AMOY_RPC_URL);
@@ -92,19 +101,28 @@ async function fetchOfferingTerms() {
 
 // ─── GET /api/offering-terms ───────────────────────────────────────────────────
 app.get('/api/offering-terms', async (req, res) => {
+  console.log("📥 Petición recibida en /api/offering-terms");
+
+  // Creamos una promesa que falla a los 5 segundos
+  const timeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('Timeout de conexión con blockchain')), 5000)
+  );
+
   try {
-    const terms = await fetchOfferingTerms();
+    // Corremos la función del contrato vs el timeout
+    const terms = await Promise.race([fetchOfferingTerms(), timeout]);
+    console.log("✅ Datos obtenidos del contrato");
     res.json(terms);
   } catch (error) {
-    console.error('Error fetching offering terms:', error);
-    res.status(500).json({ error: 'Could not fetch offering terms from contract.' });
+    console.error('❌ Error en offering-terms:', error.message);
+    res.status(500).json({ error: error.message });
   }
 });
 
 // ─── POST /api/create-checkout ─────────────────────────────────────────────────
 app.post('/api/create-checkout', async (req, res) => {
   try {
-    const { amount, metadataURI, buyerWallet, email } = req.body;
+    const { amount, metadataURI, buyerWallet, email, returnUrl } = req.body;
     // NOTE: shareBps is no longer accepted from the client — it's calculated here
     //       from the on-chain terms to prevent manipulation.
 
@@ -132,12 +150,20 @@ app.post('/api/create-checkout', async (req, res) => {
     // Calculate shareBps server-side from on-chain terms
     // shareBps = (amount / offeringValueUSD) × totalOfferedBps
     const shareBps = Math.round((amount / terms.offeringValueUSD) * terms.totalOfferedBps);
-    const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    // Use returnUrl sent by frontend (exact page the user was on), fallback to referer, then env
+    const baseUrl = returnUrl || req.headers.referer || process.env.FRONTEND_URL || 'http://localhost:3000';
+    let cleanOriginUrl = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
+    
+    // Safely extract and preserve any hash fragment for anchor links
+    let hash = '';
+    const hashIndex = cleanOriginUrl.indexOf('#');
+    if (hashIndex !== -1) {
+      hash = cleanOriginUrl.substring(hashIndex);
+      cleanOriginUrl = cleanOriginUrl.substring(0, hashIndex);
+    }
 
     console.log(`[checkout] amount=${amount}¢, shareBps=${shareBps} (from on-chain terms)`);
-    console.log("--- DEBUG STRIPE ---");
-    console.log("FRONTEND_URL Variable:", process.env.FRONTEND_URL);
-    console.log("--- END DEBUG ---");
+    console.log(`[checkout] cleanOriginUrl=${cleanOriginUrl}, hash=${hash}`);
 
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
@@ -156,8 +182,8 @@ app.post('/api/create-checkout', async (req, res) => {
         },
       ],
       mode: 'payment',
-      success_url: `${baseUrl}/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${baseUrl}/cancel`,
+      success_url: `${cleanOriginUrl}?session_id={CHECKOUT_SESSION_ID}${hash}`,
+      cancel_url: `${cleanOriginUrl}/cancel${hash}`,
       metadata: {
         buyerWallet: buyerWallet,
         shareBps: shareBps.toString(),

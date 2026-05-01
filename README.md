@@ -64,6 +64,8 @@ npm install
 npx hardhat run scripts/deploy.ts --network amoy
 ```
 
+to set terms - MIN_BUY=2000 TOTAL_BPS=1000 OFFERING_VALUE=400000 npx hardhat run scripts/setTerms.ts --network amoy
+
 ## 📄 Documentation
 
 For more detailed technical specifications, refer to:
