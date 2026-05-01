@@ -17,7 +17,6 @@ const port = process.env.PORT || 4000;
 const public_url = process.env.NEXT_PUBLIC_BACKEND_URL;
 
 // ─── CORS Configuration (single source of truth) ──────────────────────────────
-// ─── CORS Configuration (single source of truth) ──────────────────────────────
 const allowedOrigins = [
   'http://localhost:3000',
   'http://127.0.0.1:3000',
@@ -25,6 +24,8 @@ const allowedOrigins = [
   'http://127.0.0.1:5173',
   'https://lapromesadevuelta.com',
   'https://www.lapromesadevuelta.com',
+  'https://promesadevuelta.com',
+  'https://www.promesadevuelta.com',
 ];
 
 app.use(cors({
