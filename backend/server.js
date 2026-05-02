@@ -14,7 +14,26 @@ dotenv.config(); // Looks for .env in the current directory
 
 const app = express();
 const port = process.env.PORT || 4000;
-const public_url = process.env.NEXT_PUBLIC_BACKEND_URL;
+
+// ─── CORS Configuration ──────────────────────────────────────────────────────
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'https://lapromesadevuelta.com',
+  'https://www.lapromesadevuelta.com',
+  'https://promesadevuelta.com',
+  'https://www.promesadevuelta.com',
+];
+
+app.use(cors({
+  origin: allowedOrigins,
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
+}));
+app.options('*', cors());
 
 // ─── Initialize Services ──────────────────────────────────────────────────────
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
@@ -22,14 +41,15 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
 });
 
 const privy = new PrivyClient(
-  process.env.PRIVY_APP_ID,
-  process.env.PRIVY_APP_SECRET
+  process.env.PRIVY_APP_ID || 'missing_id',
+  process.env.PRIVY_APP_SECRET || 'missing_secret'
 );
 
-const resend = new Resend(process.env.RESEND_API);
+const resend = new Resend(process.env.RESEND_API || 'missing_key');
 const EMAIL_FROM = process.env.EMAIL_FROM || 'onboarding@resend.dev';
 
-const provider = new ethers.JsonRpcProvider(process.env.AMOY_RPC_URL);
+const rpcUrl = process.env.AMOY_RPC_URL || 'https://rpc-amoy.polygon.technology';
+const provider = new ethers.JsonRpcProvider(rpcUrl);
 const isValidKey = process.env.PRIVATE_KEY && process.env.PRIVATE_KEY.length >= 64;
 const signer = isValidKey
   ? new ethers.Wallet(process.env.PRIVATE_KEY.startsWith('0x') ? process.env.PRIVATE_KEY : `0x${process.env.PRIVATE_KEY}`, provider)
@@ -135,24 +155,6 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
-// ─── Middleware for other routes ─────────────────────────────────────────────
-const allowedOrigins = [
-  'http://localhost:3000',
-  'http://127.0.0.1:3000',
-  'http://localhost:5173',
-  'http://127.0.0.1:5173',
-  'https://lapromesadevuelta.com',
-  'https://www.lapromesadevuelta.com',
-];
-
-app.use(cors({
-  origin: allowedOrigins,
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true,
-}));
-
-app.options('*', cors());
 app.use(express.json());
 
 // ─── Offering Terms Cache ──────────────────────────────────────────────────────
