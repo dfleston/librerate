@@ -18,7 +18,7 @@ const public_url = process.env.NEXT_PUBLIC_BACKEND_URL;
 
 // ─── Initialize Services ──────────────────────────────────────────────────────
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-  apiVersion: '2026-03-25.dahlia',
+  apiVersion: '2023-10-16',
 });
 
 const privy = new PrivyClient(
@@ -318,17 +318,6 @@ app.get('/api/session-details/:sessionId', async (req, res) => {
   } catch (error) {
     console.error('Error fetching session details:', error);
     res.status(500).json({ error: error.message });
-  }
-});
-// ─── POST /api/test-mint ─────────────────────────────────────────────────────
-app.post('/api/test-mint', async (req, res) => {
-  try {
-    const { address, shareBps } = req.body;
-    const tx = await contract.mintCertificate(address, "ipfs://test", shareBps || 10);
-    await tx.wait();
-    res.json({ success: true, hash: tx.hash });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
   }
 });
 
