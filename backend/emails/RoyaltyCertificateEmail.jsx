@@ -110,7 +110,7 @@ export const RoyaltyCertificateEmail = ({
               email you used for this purchase:
             </Text>
             <Section style={buttonContainer}>
-              <Link href="https://dashboard.privy.io" style={button}>
+              <Link href="https://www.lapromesadevuelta.com/es/dashboard" style={button}>
                 ACCESS YOUR DASHBOARD
               </Link>
             </Section>

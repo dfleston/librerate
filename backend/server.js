@@ -10,13 +10,132 @@ import { render } from '@react-email/render';
 import RoyaltyCertificateEmail from './emails/RoyaltyCertificateEmail.jsx';
 import React from 'react';
 
-dotenv.config({ path: '../.env' });
+dotenv.config(); // Looks for .env in the current directory
 
 const app = express();
 const port = process.env.PORT || 4000;
 const public_url = process.env.NEXT_PUBLIC_BACKEND_URL;
 
-// ─── CORS Configuration (single source of truth) ──────────────────────────────
+// ─── Initialize Services ──────────────────────────────────────────────────────
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+  apiVersion: '2026-03-25.dahlia',
+});
+
+const privy = new PrivyClient(
+  process.env.PRIVY_APP_ID,
+  process.env.PRIVY_APP_SECRET
+);
+
+const resend = new Resend(process.env.RESEND_API);
+const EMAIL_FROM = process.env.EMAIL_FROM || 'onboarding@resend.dev';
+
+const provider = new ethers.JsonRpcProvider(process.env.AMOY_RPC_URL);
+const isValidKey = process.env.PRIVATE_KEY && process.env.PRIVATE_KEY.length >= 64;
+const signer = isValidKey
+  ? new ethers.Wallet(process.env.PRIVATE_KEY.startsWith('0x') ? process.env.PRIVATE_KEY : `0x${process.env.PRIVATE_KEY}`, provider)
+  : ethers.Wallet.createRandom().connect(provider);
+
+const royaltyCertificateABI = [
+  "event CertificateMinted(address indexed to, uint256 tokenId, uint256 shareBps)",
+  "function mintCertificate(address to, string memory tokenURI, uint256 shareBasisPoints) external returns (uint256)",
+  "function getOfferingTerms() external view returns (uint256 minBuy, uint256 offeredBps, uint256 offerValue)",
+  "function setOfferingTerms(uint256 minBuyAmountUSD, uint256 totalOfferedBps, uint256 offeringValueUSD) external",
+  "function shares(uint256 tokenId) view returns (uint256)",
+  "function usdc() view returns (address)",
+  "function balanceOf(address owner) view returns (uint256)",
+  "function tokenOfOwnerByIndex(address owner, uint256 index) view returns (uint256)",
+  "function totalShares() view returns (uint256)",
+];
+
+const ERC20_ABI = [
+  "function balanceOf(address account) view returns (uint256)",
+  "function decimals() view returns (uint8)",
+];
+
+const isValidContract = process.env.CONTRACT_ADDRESS && process.env.CONTRACT_ADDRESS.length === 42;
+const contractAddress = isValidContract ? process.env.CONTRACT_ADDRESS : "0x0000000000000000000000000000000000000000";
+const contract = new ethers.Contract(contractAddress, royaltyCertificateABI, signer);
+
+// ─── Webhook Handler (MUST BE FIRST ROUTE) ───────────────────────────────────
+app.use('/webhook', express.raw({ type: '*/*' }));
+
+app.post('/webhook', async (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+  console.log("--------------------------------------------------");
+  console.log("📨 WEBHOOK ATTEMPT RECEIVED");
+  console.log(`🔑 Using Secret: ${webhookSecret?.slice(0, 10)}...${webhookSecret?.slice(-5)}`);
+  console.log(`📊 Body Type: ${Buffer.isBuffer(req.body) ? 'Buffer' : typeof req.body}`);
+  
+  if (!sig || !Buffer.isBuffer(req.body)) {
+    console.error("❌ REJECTED: Missing signature or body is not a Buffer");
+    return res.status(400).send("Invalid request format");
+  }
+
+  let event;
+  try {
+    event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
+    console.log(`✅ VERIFIED: ${event.type}`);
+  } catch (err) {
+    console.error(`❌ VERIFICATION FAILED: ${err.message}`);
+    console.log(`💡 Your .env secret starts with: ${webhookSecret?.slice(0, 10)}...`);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  try {
+    if (event.type === 'checkout.session.completed') {
+      const session = event.data.object;
+      console.log(`🔔 Minting for Session: ${session.id}`);
+
+      const buyerWallet = session.metadata?.buyerWallet;
+      const shareBps = parseInt(session.metadata?.shareBps || '0');
+      const metadataURI = session.metadata?.metadataURI;
+
+      if (!buyerWallet || !shareBps) {
+        console.error('❌ Metadata missing');
+        return res.status(200).send('OK');
+      }
+
+      const tx = await contract.mintCertificate(buyerWallet, metadataURI, shareBps);
+      console.log(`⏳ Tx: ${tx.hash}`);
+      await tx.wait();
+      console.log(`✅ MINTED!`);
+      
+      try {
+        const recipientEmail = session.customer_details?.email;
+        if (recipientEmail) {
+          console.log(`📧 Sending confirmation email to ${recipientEmail}...`);
+          const emailHtml = await render(
+            React.createElement(RoyaltyCertificateEmail, {
+              buyerName: session.customer_details?.name || 'Valued Partner',
+              orderId: session.id.slice(-8).toUpperCase(),
+              purchaseDate: new Date().toLocaleDateString(),
+              bookTitle: "La Promesa Devuelta",
+              amountPaid: (session.amount_total / 100).toFixed(2),
+              sharePercentage: (shareBps / 100).toString(),
+              tokenId: "...", 
+              walletAddress: buyerWallet,
+            })
+          );
+          await resend.emails.send({
+            from: EMAIL_FROM,
+            to: [recipientEmail],
+            subject: 'Your Royalty Certificate Purchase is Confirmed',
+            html: emailHtml,
+          });
+          console.log('✅ Email sent');
+        }
+      } catch (e) { console.error('❌ Email error:', e.message); }
+    }
+    res.status(200).send('OK');
+  } catch (err) {
+    console.error(`❌ Webhook error:`, err.message);
+    res.status(200).send('OK');
+  }
+});
+
+// ─── Middleware for other routes ─────────────────────────────────────────────
 const allowedOrigins = [
   'http://localhost:3000',
   'http://127.0.0.1:3000',
@@ -24,8 +143,6 @@ const allowedOrigins = [
   'http://127.0.0.1:5173',
   'https://lapromesadevuelta.com',
   'https://www.lapromesadevuelta.com',
-  'https://promesadevuelta.com',
-  'https://www.promesadevuelta.com',
 ];
 
 app.use(cors({
@@ -35,44 +152,8 @@ app.use(cors({
   credentials: true,
 }));
 
-// Explicit OPTIONS handler for preflight
 app.options('*', cors());
-
-// Initialize Stripe
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-  apiVersion: '2023-10-16',
-});
-
-// Initialize Privy Server API
-const privy = new PrivyClient(
-  process.env.PRIVY_APP_ID,
-  process.env.PRIVY_APP_SECRET
-);
-
-// Initialize Resend
-const resend = new Resend(process.env.RESEND_API);
-const EMAIL_FROM = process.env.EMAIL_FROM || 'onboarding@resend.dev';
-
-// We need the raw body for the Stripe webhook verification.
-app.use('/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());
-
-// ─── Contract Setup ────────────────────────────────────────────────────────────
-const provider = new ethers.JsonRpcProvider(process.env.AMOY_RPC_URL);
-const isValidKey = process.env.PRIVATE_KEY && process.env.PRIVATE_KEY.length >= 64;
-const signer = isValidKey
-  ? new ethers.Wallet(process.env.PRIVATE_KEY.startsWith('0x') ? process.env.PRIVATE_KEY : `0x${process.env.PRIVATE_KEY}`, provider)
-  : ethers.Wallet.createRandom().connect(provider);
-
-const royaltyCertificateABI = [
-  "function mintCertificate(address to, string memory tokenURI, uint256 shareBasisPoints) external returns (uint256)",
-  "function getOfferingTerms() external view returns (uint256 minBuy, uint256 offeredBps, uint256 offerValue)",
-  "function setOfferingTerms(uint256 minBuyAmountUSD, uint256 totalOfferedBps, uint256 offeringValueUSD) external",
-];
-
-const isValidContract = process.env.CONTRACT_ADDRESS && process.env.CONTRACT_ADDRESS.length === 42;
-const contractAddress = isValidContract ? process.env.CONTRACT_ADDRESS : "0x0000000000000000000000000000000000000000";
-const contract = new ethers.Contract(contractAddress, royaltyCertificateABI, signer);
 
 // ─── Offering Terms Cache ──────────────────────────────────────────────────────
 let termsCache = null;
@@ -199,95 +280,27 @@ app.post('/api/create-checkout', async (req, res) => {
   }
 });
 
-// ─── POST /webhook ─────────────────────────────────────────────────────────────
-app.post('/webhook', async (req, res) => {
-  const sig = req.headers['stripe-signature'];
-  let event;
 
+// ─── GET /api/tier-status ────────────────────────────────────────────────────
+app.get('/api/tier-status', async (req, res) => {
   try {
-    event = stripe.webhooks.constructEvent(
-      req.body,
-      sig,
-      process.env.STRIPE_WEBHOOK_SECRET
-    );
-  } catch (err) {
-    console.error('Webhook signature verification failed:', err.message);
-    return res.status(400).send(`Webhook Error: ${err.message}`);
-  }
-
-  try {
-    if (event.type === 'checkout.session.completed') {
-      const session = event.data.object;
-
-      if (session.payment_status !== 'paid') {
-        console.log(`Payment not complete for session ${session.id}`);
-        return res.status(200).send('OK');
-      }
-
-      const buyerWallet = session.metadata?.buyerWallet;
-      const shareBps = parseInt(session.metadata?.shareBps || '0');
-      const metadataURI = session.metadata?.metadataURI;
-
-      if (!buyerWallet || !shareBps) {
-        console.error('Missing required metadata in session:', session.id);
-        return res.status(200).send('OK - Missing metadata');
-      }
-
-      console.log(`Minting certificate to ${buyerWallet} for session ${session.id}...`);
-
-      try {
-        const tx = await contract.mintCertificate(buyerWallet, metadataURI, shareBps);
-        await tx.wait();
-        console.log(`✅ Successfully minted for session ${session.id}, Tx: ${tx.hash}`);
-      } catch (mintError) {
-        console.error(`❌ Minting failed for ${session.id}:`, mintError);
-      }
-
-      // Send Confirmation Email
-      try {
-        const recipientEmail = session.customer_details?.email;
-        if (!recipientEmail) throw new Error('No recipient email found');
-
-        console.log(`📧 Sending confirmation email to ${recipientEmail}...`);
-
-        const emailHtml = await render(
-          React.createElement(RoyaltyCertificateEmail, {
-            buyerName: session.customer_details?.name || 'Valued Partner',
-            orderId: session.id.slice(-8).toUpperCase(),
-            purchaseDate: new Date().toLocaleDateString(),
-            bookTitle: "The Silken Thread",
-            amountPaid: (session.amount_total / 100).toFixed(2),
-            sharePercentage: (shareBps / 100).toString(),
-            tokenId: "1001",
-            walletAddress: buyerWallet,
-          })
-        );
-
-        const { data, error } = await resend.emails.send({
-          from: EMAIL_FROM,
-          to: [recipientEmail],
-          subject: 'Thank You – Your Royalty Certificate Purchase is Confirmed',
-          html: emailHtml,
-        });
-
-        if (error) {
-          console.error('❌ Resend Error:', error);
-        } else {
-          console.log('✅ Email sent successfully:', data.id);
-        }
-      } catch (emailError) {
-        console.error('❌ Failed to send email:', emailError);
-      }
-    }
-
-    res.status(200).send('OK');
+    const totalShares = await contract.totalShares();
+    const terms = await fetchOfferingTerms();
+    
+    res.json({
+      totalSharesBps: Number(totalShares),
+      totalOfferedBps: terms.totalOfferedBps,
+      // Total percentage of the offering sold
+      progressPercent: terms.totalOfferedBps > 0 
+        ? (Number(totalShares) / terms.totalOfferedBps) * 100 
+        : 0
+    });
   } catch (error) {
-    console.error(`Error processing event ${event.type}:`, error);
-    res.status(200).send('OK');
+    res.status(500).json({ error: error.message });
   }
 });
 
-// ─── GET /api/session-details/:sessionId ───────────────────────────────────────
+// ─── POST /api/session-details/:sessionId ───────────────────────────────────────
 app.get('/api/session-details/:sessionId', async (req, res) => {
   try {
     const { sessionId } = req.params;
@@ -305,6 +318,74 @@ app.get('/api/session-details/:sessionId', async (req, res) => {
   } catch (error) {
     console.error('Error fetching session details:', error);
     res.status(500).json({ error: error.message });
+  }
+});
+// ─── POST /api/test-mint ─────────────────────────────────────────────────────
+app.post('/api/test-mint', async (req, res) => {
+  try {
+    const { address, shareBps } = req.body;
+    const tx = await contract.mintCertificate(address, "ipfs://test", shareBps || 10);
+    await tx.wait();
+    res.json({ success: true, hash: tx.hash });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── GET /api/user-certificates/:address ─────────────────────────────────────
+app.get("/api/user-certificates/:address", async (req, res) => {
+  try {
+    const { address } = req.params;
+    if (!ethers.isAddress(address)) {
+      return res.status(400).json({ error: "Invalid address" });
+    }
+
+    console.log(`🔎 Directly querying state for: ${address}`);
+
+    // 1. Get how many tokens they own
+    const balance = await contract.balanceOf(address);
+    const count = Number(balance);
+
+    const certificates = [];
+    let totalBps = 0;
+
+    // 2. Iterate through their tokens using Enumerable methods
+    // This doesn't use eth_getLogs, so no block range limits!
+    for (let i = 0; i < count; i++) {
+      try {
+        const tokenId = await contract.tokenOfOwnerByIndex(address, i);
+        const bps = await contract.shares(tokenId);
+        
+        certificates.push({ 
+          tokenId: tokenId.toString(), 
+          shareBps: Number(bps) 
+        });
+        totalBps += Number(bps);
+      } catch (err) {
+        console.error(`Error reading token at index ${i}:`, err.message);
+      }
+    }
+
+    // 3. USDC balance
+    let usdcBalance = "0.00";
+    try {
+      const usdcAddress = await contract.usdc();
+      const usdcContract = new ethers.Contract(usdcAddress, ERC20_ABI, provider);
+      const bal = await usdcContract.balanceOf(address);
+      const decimals = await usdcContract.decimals();
+      usdcBalance = parseFloat(ethers.formatUnits(bal, decimals)).toFixed(2);
+    } catch (err) {
+      console.warn("Could not fetch USDC balance:", err.message);
+    }
+
+    res.json({
+      certificates,
+      totalBps,
+      usdcBalance,
+    });
+  } catch (err) {
+    console.error("user-certificates error:", err);
+    res.status(500).json({ error: err.message });
   }
 });
 
