@@ -14,6 +14,7 @@ dotenv.config(); // Looks for .env in the current directory
 
 const app = express();
 const port = process.env.PORT || 4000;
+const public_url = process.env.NEXT_PUBLIC_BACKEND_URL || `http://localhost:${port}`;
 
 // ─── CORS Configuration ──────────────────────────────────────────────────────
 const allowedOrigins = [
