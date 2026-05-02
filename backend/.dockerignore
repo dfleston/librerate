@@ -28,11 +28,3 @@ LICENSE
 .vscode
 .idea
 .DS_Store
-
-networks: {
-  amoy: {
-    url: process.env.AMOY_RPC_URL || "https://rpc-amoy.polygon.technology",
-    accounts: process.env.PRIVATE_KEY ? [`0x${process.env.PRIVATE_KEY}`] : [],
-    chainId: 80002,
-  },
-}
